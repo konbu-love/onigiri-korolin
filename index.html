@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>おむすびコロリン</title>
+<style>
+  html,body{margin:0;height:100%;background:#f3ecdc;font-family:sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+  #wrap{position:relative;height:100%;max-width:480px;margin:0 auto}
+  canvas{display:block;width:100%;height:100%}
+  #hud{position:absolute;top:6px;left:8px;right:8px;display:flex;justify-content:space-between;font-weight:bold;font-size:16px;color:#333;pointer-events:none}
+  #over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,255,255,.85);text-align:center;gap:12px;padding:20px}
+  #over h1{margin:0;font-size:26px}
+  #over p{margin:0;font-size:15px;line-height:1.6}
+  button{font-size:20px;padding:12px 36px;border:3px solid #333;border-radius:999px;background:#fff;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="hud"><span id="time">⏱ 60</span><span id="score">🍙 0</span></div>
+  <div id="over">
+    <h1>おむすびコロリン</h1>
+    <p id="msg">穴から落ちてくるおにぎりを<br>こまねずみのザルでキャッチ！<br>指で左右に動かしてね</p>
+    <button id="start">はじめる</button>
+  </div>
+</div>
+<script>
+const cv=document.getElementById('c'),g=cv.getContext('2d');
+const over=document.getElementById('over'),msg=document.getElementById('msg');
+const tEl=document.getElementById('time'),sEl=document.getElementById('score');
+let W,H,dpr;
+function resize(){dpr=window.devicePixelRatio||1;const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*dpr;cv.height=H*dpr;g.setTransform(dpr,0,0,dpr,0,0);}
+addEventListener('resize',resize);resize();
+
+const LIMIT=60;
+let playing=false,timeLeft=LIMIT,score=0,missed=0,holes=[],balls=[],mx=.5,targetX=.5,spawnT=0,last=0;
+
+// 画面の区切り(割合)
+const groundTop=()=>H*.13, groundH=()=>H*.07;
+const floorY=()=>H*.68;          // こまねずみが走る床
+function reset(){playing=true;timeLeft=LIMIT;score=0;missed=0;holes=[];balls=[];spawnT=.5;mx=targetX=.5;over.style.display='none';}
+
+function setX(e){const r=cv.getBoundingClientRect();const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left;targetX=Math.max(.08,Math.min(.92,x/W));}
+cv.addEventListener('pointerdown',setX);cv.addEventListener('pointermove',e=>{if(e.buttons||e.pointerType==='touch')setX(e)});
+addEventListener('keydown',e=>{if(e.key==='ArrowLeft')targetX=Math.max(.08,targetX-.08);if(e.key==='ArrowRight')targetX=Math.min(.92,targetX+.08);});
+document.getElementById('start').onclick=reset;
+
+function update(dt){
+  timeLeft-=dt;
+  if(timeLeft<=0){timeLeft=0;playing=false;
+    msg.innerHTML='おしまい！<br>キャッチ '+score+' こ ／ おとした '+missed+' こ<br>'+(score>=30?'ネズミ、まんまる。':score>=15?'ネズミ、ぽっちゃり。':'ネズミ、まだ はらぺこ。');
+    document.getElementById('start').textContent='もういちど';over.style.display='flex';}
+  mx+=(targetX-mx)*Math.min(1,dt*14);
+  // 穴の出現(だんだん速く)
+  spawnT-=dt;
+  if(spawnT<=0){const prog=1-timeLeft/LIMIT;spawnT=1.3-prog*.7+Math.random()*.4;
+    holes.push({x:.1+Math.random()*.8,t:0,dur:1.2-prog*.4});}
+  for(const h of holes){h.t+=dt;
+    if(!h.done&&h.t>=h.dur){h.done=true;balls.push({x:h.x,y:groundTop()+groundH(),v:H*(.32+ (1-timeLeft/LIMIT)*.2)});}}
+  holes=holes.filter(h=>h.t<h.dur+.5);
+  const fy=floorY(),zw=W*.11;
+  for(const b of balls){b.y+=b.v*dt;
+    if(!b.gone&&b.y>=fy-H*.045&&b.y<=fy&&Math.abs(b.x-mx)*W<zw){b.gone=true;score++;}
+    else if(!b.gone&&b.y>fy+10){b.gone=true;missed++;}}
+  balls=balls.filter(b=>!b.gone);
+  tEl.textContent='⏱ '+Math.ceil(timeLeft);sEl.textContent='🍙 '+score;
+}
+
+function onigiri(x,y,s){g.lineWidth=3;g.strokeStyle='#111';g.fillStyle='#fff';
+  g.beginPath();g.moveTo(x,y-s);g.quadraticCurveTo(x+s*1.2,y+s*.9,x,y+s*.9);g.quadraticCurveTo(x-s*1.2,y+s*.9,x,y-s);g.fill();g.stroke();
+  g.fillStyle='#111';g.fillRect(x-s*.35,y+s*.2,s*.7,s*.6);}
+
+function draw(){
+  g.clearRect(0,0,W,H);
+  const gt=groundTop(),gh=groundH(),fy=floorY();
+  // 空と地上
+  const sky=g.createLinearGradient(0,0,0,gt);sky.addColorStop(0,'#3cf');sky.addColorStop(1,'#eaffff');g.fillStyle=sky;g.fillRect(0,0,W,gt);
+  g.strokeStyle='#111';g.lineWidth=3;g.lineCap='round';
+  // 家
+  let hx=W*.86;g.beginPath();g.moveTo(hx-W*.07,gt-H*.03);g.lineTo(hx,gt-H*.07);g.lineTo(hx+W*.07,gt-H*.03);g.moveTo(hx-W*.04,gt-H*.035);g.lineTo(hx-W*.04,gt);g.moveTo(hx+W*.04,gt-H*.035);g.lineTo(hx+W*.04,gt);g.stroke();
+  // 木
+  g.fillStyle='#6b2';g.beginPath();g.arc(W*.7,gt-H*.055,H*.025,0,7);g.fill();g.stroke();g.beginPath();g.moveTo(W*.7,gt-H*.03);g.lineTo(W*.7,gt);g.stroke();
+  // 草
+  g.fillStyle='#6b2';for(const p of[.05,.3,.45,.55,.6,.78])g.fillRect(W*p,gt-6,4,6);
+  // 地面
+  g.fillStyle='#b85f00';g.fillRect(0,gt,W,gh);
+  // 穴(1/3→2/3→開通)
+  g.fillStyle='#111';
+  for(const h of holes){const p=Math.min(1,h.t/h.dur);const step=p>=1?1:p>=.66?2/3:p>=.33?1/3:.12;
+    g.beginPath();g.ellipse(h.x*W,gt+gh*step/2,W*.028,gh*step/2+2,0,0,7);g.fill();}
+  // おにぎり
+  for(const b of balls)onigiri(b.x*W,b.y,H*.028);
+  // 床の線
+  g.strokeStyle='#111';g.lineWidth=3;g.beginPath();g.moveTo(0,fy);g.lineTo(W,fy);g.stroke();
+  // こまねずみ(ザル持ち)
+  const x=mx*W,s=H*.03;
+  g.fillStyle='#fff';
+  g.beginPath();g.ellipse(x-s*1.3,fy-s*1.1,s*.8,s*1.1,0,0,7);g.fill();g.stroke(); // 体
+  g.beginPath();g.arc(x-s*1.3,fy-s*2.6,s*.7,0,7);g.fill();g.stroke(); // 頭
+  g.beginPath();g.arc(x-s*1.9,fy-s*3.2,s*.35,0,7);g.fill();g.stroke();g.beginPath();g.arc(x-s*.8,fy-s*3.3,s*.35,0,7);g.fill();g.stroke(); // 耳
+  g.fillStyle='#111';g.beginPath();g.arc(x-s*1.05,fy-s*2.7,2.5,0,7);g.fill(); // 目
+  g.beginPath();g.moveTo(x-s*2.1,fy-s*.6);g.quadraticCurveTo(x-s*3.4,fy-s*.8,x-s*3,fy-s*2);g.stroke(); // しっぽ
+  g.beginPath();g.moveTo(x-s*.7,fy-s*1.5);g.lineTo(x-W*.09,fy-s*1.5);g.stroke(); // 腕
+  const zw=W*.1;g.fillStyle='#f5e6b8';g.beginPath();g.moveTo(x-zw,fy-s*1.7);g.lineTo(x+zw,fy-s*1.7);g.quadraticCurveTo(x,fy-s*.3,x-zw,fy-s*1.7);g.fill();g.stroke(); // ザル
+
+  bigMouse();
+}
+
+// 下部の寝転びネズミ(食べるほどお腹が大きく)
+function bigMouse(){
+  const t=performance.now()/1000,grow=Math.min(score,40)/40,PI=Math.PI;
+  const breath=1+Math.sin(t*1.6)*.025;           // ゆっくり寝息
+  const by=H+2,bx=W*.4,bw=W*(.2+grow*.2),bh=H*(.085+grow*.15)*breath;
+  const L='#111',FUR='#e6e2dc',PINK='#f7b6c2';
+  g.lineJoin='round';g.lineCap='round';
+  // しっぽ
+  const tx=bx-bw+4,ty=H-H*.012;
+  g.beginPath();g.moveTo(tx,ty);g.bezierCurveTo(tx-W*.1,ty-H*.005,tx-W*.13,ty-H*.07,tx-W*.06,ty-H*.065);
+  g.lineWidth=8;g.strokeStyle=L;g.stroke();g.lineWidth=3.5;g.strokeStyle=PINK;g.stroke();
+  g.lineWidth=3;g.strokeStyle=L;
+  // 頭
+  const hr=W*.1,hx=bx+bw+hr*.55,hy=H-hr*.95;
+  g.save();g.translate(hx,hy);g.rotate(.25);
+  for(const sx of[-1,1]){
+    g.fillStyle=FUR;g.beginPath();g.arc(sx*hr*.72,-hr*.72,hr*.42,0,7);g.fill();g.stroke();
+    g.fillStyle=PINK;g.beginPath();g.arc(sx*hr*.72,-hr*.72,hr*.24,0,7);g.fill();}
+  g.fillStyle=FUR;g.beginPath();g.ellipse(0,0,hr,hr*.88,0,0,7);g.fill();g.stroke();
+  for(const sx of[-1,1]){
+    g.globalAlpha=.6;g.fillStyle=PINK;g.beginPath();g.ellipse(sx*hr*.62,hr*.22,hr*.17,hr*.1,0,0,7);g.fill();g.globalAlpha=1;
+    g.beginPath();g.arc(sx*hr*.4,-hr*.15,hr*.16,.15*PI,.85*PI);g.stroke();      // 閉じた目
+    g.lineWidth=1.5;g.beginPath();g.moveTo(sx*hr*.32,hr*.24);g.lineTo(sx*hr*.9,hr*.1);g.moveTo(sx*hr*.32,hr*.3);g.lineTo(sx*hr*.9,hr*.38);g.stroke();g.lineWidth=3; // ひげ
+    g.beginPath();g.arc(sx*hr*.1,hr*.27,hr*.1,0,PI);g.stroke();}                 // 口
+  g.fillStyle=PINK;g.beginPath();g.ellipse(0,hr*.17,hr*.11,hr*.08,0,0,7);g.fill();g.stroke(); // 鼻
+  g.restore();
+  // 体とお腹
+  g.fillStyle=FUR;g.beginPath();g.ellipse(bx,by,bw,bh,0,PI,2*PI);g.closePath();g.fill();g.stroke();
+  g.fillStyle='#fffdf8';g.beginPath();g.ellipse(bx,by,bw*.72,bh*.78,0,PI,2*PI);g.fill();
+  g.lineWidth=2;g.beginPath();g.arc(bx+bw*.05,by-bh*.7,3,0,7);g.stroke();g.lineWidth=3; // おへそ
+  const Y=dx=>by-bh*Math.sqrt(1-(dx/bw)**2);
+  // 手(お腹の上)
+  let dx=bw*.62;g.fillStyle=FUR;g.beginPath();g.ellipse(bx+dx,Y(dx)+3,W*.038,H*.014,.6,0,7);g.fill();g.stroke();
+  // 足
+  for(const f of[-.74,-.52]){dx=bw*f;const fx=bx+dx,fy=Y(dx)-H*.006;
+    g.fillStyle=FUR;g.beginPath();g.ellipse(fx,fy,W*.03,H*.022,-.5,0,7);g.fill();g.stroke();
+    g.fillStyle=PINK;g.beginPath();g.ellipse(fx,fy,W*.015,H*.011,-.5,0,7);g.fill();}
+  // Zzz
+  g.fillStyle='#557';
+  for(let i=0;i<3;i++){const p=(t*.4+i/3)%1;g.globalAlpha=1-p;g.font='bold '+(12+p*14)+'px sans-serif';
+    g.fillText('z',hx+hr*.2+p*W*.07,hy-hr*1.35-p*H*.07);}
+  g.globalAlpha=1;
+}
+
+function loop(t){const dt=Math.min(.05,(t-last)/1000||0);last=t;if(playing)update(dt);draw();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
